@@ -17,9 +17,11 @@ export default async function handler(req, res) {
   const session = await fetchCheckoutSession(sessionId);
   if (!sessionPaid(session)) return res.status(402).json({ ok: false, error: "unpaid" });
   try {
-    const plan = planFromSession(session);
+    const rawRef = String(session.client_reference_id || "");
+    const marked = rawRef.match(/^(underlay|pro|max|play):(.*)$/);
+    const plan = (marked && marked[1]) || planFromSession(session);
     const token = signLicense(plan, session.id || sessionId);
-    return res.status(200).json({ ok: true, plan, token });
+    return res.status(200).json({ ok: true, plan, token, email: marked ? marked[2] : "" });
   } catch {
     return res.status(503).json({ ok: false, error: "noconfig" });
   }
