@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-const PLANS = ["underlay", "pro", "max"];
+const PLANS = ["underlay", "pro", "max", "play"];
 
 export function stripeKey() {
   return process.env.STRIPE_SECRET_KEY || "";
@@ -16,9 +16,12 @@ export function parsePlan(value) {
 }
 
 export function planFromAmount(cents) {
-  if (cents <= 799) return "underlay";
-  if (cents <= 1499) return "pro";
-  return "max";
+  const n = Number(cents) || 0;
+  if (n >= 1800) return "max";
+  if (n >= 950) return "pro";
+  if (n >= 750) return "play";
+  if (n > 0) return "underlay";
+  return null;
 }
 
 export function signLicense(plan, sid) {
@@ -53,7 +56,7 @@ export async function fetchCheckoutSession(id) {
   const key = stripeKey();
   if (!key) return null;
   const res = await fetch(
-    `https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(id)}`,
+    `https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(id)}?expand[]=line_items`,
     { headers: { Authorization: `Bearer ${key}` } },
   );
   if (!res.ok) return null;
@@ -70,7 +73,15 @@ export function sessionPaid(s) {
 }
 
 export function planFromSession(s) {
-  return parsePlan(s.metadata?.plan) || planFromAmount(Number(s.amount_total) || 0);
+  const items = s && s.line_items && s.line_items.data;
+  if (Array.isArray(items)) {
+    for (const item of items) {
+      const unit = item && item.price && item.price.unit_amount;
+      const plan = planFromAmount(unit);
+      if (plan) return plan;
+    }
+  }
+  return planFromAmount(Number(s && s.amount_total) || 0);
 }
 
 export function cors(res) {
