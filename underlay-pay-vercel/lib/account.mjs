@@ -141,9 +141,11 @@ export async function refreshCustomerById(id) {
   return publicProfile(next);
 }
 export async function findCustomer(email) {
-  const q = `email:"${email.replace(/"/g, "")}"`;
-  const found = await stripeGet(`/customers/search?query=${encodeURIComponent(q)}&limit=1`);
-  if (!found.ok) return { error: "stripe" };
+  const found = await stripeGet(`/customers?email=${encodeURIComponent(email)}&limit=1`);
+  if (!found.ok) {
+    const msg = found.data && found.data.error && found.data.error.message;
+    return { error: "stripe", detail: msg || "find" };
+  }
   const row = found.data && found.data.data && found.data.data[0];
   return { customer: row || null };
 }
@@ -168,7 +170,7 @@ export async function signupAccount(email, password) {
   };
   if (!found.customer) {
     const made = await writeCustomer("", { email, ...base });
-    if (!made.ok) return { error: "stripe" };
+    if (!made.ok) return { error: "stripe", detail: (made.data && made.data.error && made.data.error.message) || "create" };
     return publicProfile(made.data);
   }
   const meta = found.customer.metadata || {};
@@ -180,7 +182,7 @@ export async function signupAccount(email, password) {
     "metadata[paid]": meta.paid || "0",
     "metadata[platforms]": meta.platforms || "",
   });
-  if (!made.ok) return { error: "stripe" };
+  if (!made.ok) return { error: "stripe", detail: (made.data && made.data.error && made.data.error.message) || "create" };
   return publicProfile(made.data);
 }
 
@@ -206,7 +208,7 @@ export async function googleAccount(email) {
       "metadata[paid]": "0",
       "metadata[platforms]": "",
     });
-    if (!made.ok) return { error: "stripe" };
+    if (!made.ok) return { error: "stripe", detail: (made.data && made.data.error && made.data.error.message) || "create" };
     return publicProfile(made.data);
   }
   if ((found.customer.metadata || {}).pw) return { error: "password" };
@@ -233,7 +235,7 @@ export async function syncAccount(token, platforms) {
   if ((fresh.metadata || {}).paid !== "1") return publicProfile(fresh);
   const saved = plan === "max" ? PLATS.slice() : list;
   const made = await writeCustomer(found.customer.id, { "metadata[platforms]": saved.join(",") });
-  if (!made.ok) return { error: "stripe" };
+  if (!made.ok) return { error: "stripe", detail: (made.data && made.data.error && made.data.error.message) || "create" };
   return publicProfile(made.data);
 }
 
