@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Reset password — UNDERLAY</title>
+    <link rel="icon" href="/underlay-mark.png" type="image/png" />
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #0b0b0c;
+        color: #f2f1ee;
+        padding: 40px 20px;
+      }
+      main { width: 100%; max-width: 22rem; text-align: center; }
+      img { width: 72px; height: 72px; border-radius: 16px; }
+      .kicker {
+        margin: 20px 0 0;
+        font-size: 11px;
+        letter-spacing: 0.28em;
+        text-transform: uppercase;
+        color: #8c8c93;
+      }
+      h1 { font-family: ui-serif, Georgia, serif; font-size: 2.2rem; font-weight: 500; margin: 8px 0 0; }
+      p { color: #8c8c93; }
+      input {
+        display: block;
+        width: 100%;
+        height: 48px;
+        margin: 10px 0 0;
+        padding: 0 14px;
+        border: 0;
+        border-radius: 16px;
+        background: #141416;
+        color: #f2f1ee;
+        font: 15px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      button {
+        display: flex;
+        width: 100%;
+        height: 48px;
+        margin-top: 12px;
+        align-items: center;
+        justify-content: center;
+        border: 0;
+        border-radius: 16px;
+        background: #f2f1ee;
+        color: #0b0b0c;
+        font: 500 15px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        cursor: pointer;
+      }
+      .msg { min-height: 1.4em; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/underlay-mark.png" alt="UNDERLAY" width="72" height="72" />
+      <p class="kicker">Underlay</p>
+      <h1>New password</h1>
+      <p>At least 4 characters. Then log in again in the extension.</p>
+      <form id="form">
+        <input id="pass" type="password" autocomplete="new-password" placeholder="New password" required />
+        <button type="submit">Save password</button>
+      </form>
+      <p class="msg" id="msg"></p>
+    </main>
+    <script>
+      const token = new URLSearchParams(location.search).get("token") || "";
+      const form = document.getElementById("form");
+      const msg = document.getElementById("msg");
+      if (!/^[a-f0-9]{48}$/.test(token)) {
+        form.hidden = true;
+        msg.textContent = "This link is not valid. Ask for a new one in the extension.";
+      }
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const password = document.getElementById("pass").value || "";
+        msg.textContent = "";
+        if (password.length < 4) {
+          msg.textContent = "Use at least 4 characters.";
+          return;
+        }
+        const res = await fetch("/api/account/reset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, password }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (data && data.ok) {
+          form.hidden = true;
+          msg.textContent = "Password saved. Go back to UNDERLAY and log in.";
+          return;
+        }
+        msg.textContent = data.error === "token"
+          ? "This link has expired. Ask for a new one."
+          : "Could not save the password. Try again.";
+      });
+    </script>
+  </body>
+</html>
