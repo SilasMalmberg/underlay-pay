@@ -1,5 +1,6 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual, randomBytes } from "node:crypto";
 import { parsePlan, planFromAmount, stripeKey } from "./license.mjs";
+import { mailReady, sendMail } from "./mail.mjs";
 
 const PLATS = ["chatgpt", "claude", "gemini", "grok", "perplexity", "deepseek", "meta"];
 
@@ -86,11 +87,14 @@ function profileOf(customer) {
   const plan = parsePlan(meta.plan) || "preview";
   let platforms = cleanPlatforms(meta.platforms);
   if (plan === "max") platforms = PLATS.slice();
+  const until = Number(meta.until) || 0;
+  const promoOpen = !meta.promo || !until || until > Date.now();
   return {
     email: cleanEmail(customer.email),
     plan,
-    paid: meta.paid === "1" && plan !== "preview",
+    paid: meta.paid === "1" && plan !== "preview" && promoOpen,
     platforms,
+    until,
     auth: meta.auth === "google" ? "google" : "password",
   };
 }
@@ -100,13 +104,23 @@ const RANK = { underlay: 1, play: 2, pro: 3, max: 4 };
 
 export async function refreshCustomerAccess(customer) {
   if (!customer || !customer.id || !stripeKey()) return customer;
+  const meta = customer.metadata || {};
+  if (meta.promo && meta.paid === "1") {
+    const until = Number(meta.until || 0);
+    if (until && until < Date.now()) {
+      const made = await writeCustomer(customer.id, {
+        "metadata[paid]": "0",
+        "metadata[plan]": "preview",
+      });
+      return made.ok && made.data ? made.data : customer;
+    }
+  }
   const listed = await stripeGet(
     `/subscriptions?customer=${encodeURIComponent(customer.id)}&status=all&limit=100`,
   );
   if (!listed.ok || !listed.data || !Array.isArray(listed.data.data)) return customer;
   const subs = listed.data.data;
   if (!subs.length) return customer;
-  const meta = customer.metadata || {};
   let best = null;
   for (const sub of subs) {
     if (!LIVE.has(sub.status)) continue;
@@ -116,6 +130,8 @@ export async function refreshCustomerAccess(customer) {
     if (!best || RANK[plan] > RANK[best]) best = plan;
   }
   if (best) {
+    const current = parsePlan(meta.plan);
+    if (meta.promo && meta.paid === "1" && current && RANK[current] > RANK[best]) return customer;
     if (meta.paid === "1" && meta.plan === best) return customer;
     const made = await writeCustomer(customer.id, {
       "metadata[paid]": "1",
@@ -124,6 +140,7 @@ export async function refreshCustomerAccess(customer) {
     });
     return made.ok && made.data ? made.data : customer;
   }
+  if (meta.promo && meta.paid === "1") return customer;
   if (meta.paid !== "1") return customer;
   const made = await writeCustomer(customer.id, {
     "metadata[paid]": "0",
@@ -171,7 +188,7 @@ export async function signupAccount(email, password) {
   if (!found.customer) {
     const made = await writeCustomer("", { email, ...base });
     if (!made.ok) return { error: "stripe", detail: (made.data && made.data.error && made.data.error.message) || "create" };
-    return publicProfile(made.data);
+    return { ...publicProfile(made.data), created: true };
   }
   const meta = found.customer.metadata || {};
   if (meta.pw) return { error: "exists" };
@@ -190,7 +207,9 @@ export async function loginAccount(email, password) {
   if (!stripeKey()) return { error: "noconfig" };
   const found = await findCustomer(email);
   if (found.error) return found;
-  if (!found.customer || !(found.customer.metadata || {}).pw) return { error: "missing" };
+  if (!found.customer) return { error: "missing" };
+  const meta = found.customer.metadata || {};
+  if (!meta.pw) return { error: meta.auth === "google" ? "useGoogle" : "missing" };
   if (!passwordOk(email, password, found.customer.metadata.pw)) return { error: "pass" };
   const fresh = await refreshCustomerAccess(found.customer);
   return publicProfile(fresh);
@@ -209,9 +228,8 @@ export async function googleAccount(email) {
       "metadata[platforms]": "",
     });
     if (!made.ok) return { error: "stripe", detail: (made.data && made.data.error && made.data.error.message) || "create" };
-    return publicProfile(made.data);
+    return { ...publicProfile(made.data), created: true };
   }
-  if ((found.customer.metadata || {}).pw) return { error: "password" };
   const fresh = await refreshCustomerAccess(found.customer);
   return publicProfile(fresh);
 }
@@ -254,10 +272,17 @@ export async function openPortal(email) {
   return { ok: true, url: made.data.url };
 }
 
-export async function savePaidPlan(email, plan) {
+export async function savePaidPlan(email, plan, promo, extend = true) {
   const clean = cleanEmail(email);
   const next = parsePlan(plan);
   if (!clean || !next || !stripeKey()) return { error: "skip" };
+  const until = String(Date.now() + 1000 * 60 * 60 * 24 * 90);
+  const mark = promo
+    ? {
+        "metadata[promo]": String(promo).slice(0, 40),
+        ...(extend ? { "metadata[until]": until } : {}),
+      }
+    : {};
   const found = await findCustomer(clean);
   if (found.error || !found.customer) {
     const made = await writeCustomer("", {
@@ -266,6 +291,7 @@ export async function savePaidPlan(email, plan) {
       "metadata[plan]": next,
       "metadata[paid]": "1",
       "metadata[platforms]": next === "max" ? PLATS.join(",") : "",
+      ...mark,
     });
     return made.ok ? publicProfile(await refreshCustomerAccess(made.data)) : { error: "stripe" };
   }
@@ -274,6 +300,56 @@ export async function savePaidPlan(email, plan) {
     "metadata[plan]": next,
     "metadata[paid]": "1",
     "metadata[platforms]": next === "max" ? PLATS.join(",") : meta.platforms || "",
+    ...mark,
   });
   return made.ok ? publicProfile(await refreshCustomerAccess(made.data)) : { error: "stripe" };
+}
+
+export async function requestReset(email, origin) {
+  if (!stripeKey()) return { error: "noconfig" };
+  if (!mailReady()) return { error: "nomail" };
+  const clean = cleanEmail(email);
+  if (!clean) return { error: "email" };
+  const found = await findCustomer(clean);
+  if (found.error) return found;
+  if (!found.customer || !(found.customer.metadata || {}).pw) return { ok: true };
+  const token = randomBytes(24).toString("hex");
+  const exp = Date.now() + 1000 * 60 * 30;
+  const made = await writeCustomer(found.customer.id, {
+    "metadata[reset]": token,
+    "metadata[reset_exp]": String(exp),
+  });
+  if (!made.ok) return { error: "stripe" };
+  const link = `${String(origin || "https://underlay-pay-info.vercel.app").replace(/\/$/, "")}/reset?token=${token}`;
+  const sent = await sendMail({
+    to: clean,
+    subject: "Reset your UNDERLAY password",
+    html: `<p>Choose a new password for UNDERLAY. This link works for 30 minutes.</p><p><a href="${link}">${link}</a></p><p>If you did not ask for this, you can ignore the email.</p>`,
+  });
+  if (!sent.ok) return { error: "nomail" };
+  return { ok: true };
+}
+
+export async function resetPassword(token, password) {
+  if (!stripeKey()) return { error: "noconfig" };
+  const clean = String(token || "").trim();
+  if (!/^[a-f0-9]{48}$/.test(clean)) return { error: "token" };
+  if (!password || String(password).length < 4) return { error: "pass" };
+  const q = `metadata["reset"]:"${clean}"`;
+  const found = await stripeGet(`/customers/search?query=${encodeURIComponent(q)}&limit=1`);
+  if (!found.ok) return { error: "stripe", detail: (found.data && found.data.error && found.data.error.message) || "search" };
+  const customer = found.data && found.data.data && found.data.data[0];
+  if (!customer) return { error: "token" };
+  const exp = Number((customer.metadata || {}).reset_exp || 0);
+  if (!exp || exp < Date.now()) return { error: "token" };
+  const email = cleanEmail(customer.email);
+  if (!email) return { error: "token" };
+  const made = await writeCustomer(customer.id, {
+    "metadata[pw]": passwordHash(email, password),
+    "metadata[auth]": "password",
+    "metadata[reset]": "",
+    "metadata[reset_exp]": "",
+  });
+  if (!made.ok) return { error: "stripe" };
+  return { ok: true };
 }
