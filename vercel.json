@@ -1,3 +1,10 @@
 {
-  "cleanUrls": true
+  "cleanUrls": true,
+  "redirects": [
+    {
+      "source": "/chrome",
+      "destination": "https://chromewebstore.google.com/detail/mjgglkjnmhnneebcjkopjhckhgiakhcd",
+      "permanent": false
+    }
+  ]
 }
