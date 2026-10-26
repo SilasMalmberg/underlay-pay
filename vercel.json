@@ -5,6 +5,11 @@
       "source": "/chrome",
       "destination": "https://chromewebstore.google.com/detail/mjgglkjnmhnneebcjkopjhckhgiakhcd",
       "permanent": false
+    },
+    {
+      "source": "/home",
+      "destination": "https://underlay.framer.website",
+      "permanent": false
     }
   ]
 }
