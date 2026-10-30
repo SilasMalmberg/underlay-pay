@@ -6,15 +6,37 @@
   <title>Underlay guide</title>
   <style>
     html, body { margin: 0; height: 100%; background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; }
-    p { margin: 0; font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: rgba(255,255,255,0.72); }
-    .stage { width: min(1100px, calc(100vw - 48px)); aspect-ratio: 16 / 9; background: #000; }
+    body { display: flex; align-items: center; justify-content: center; }
+    .stage {
+      position: relative;
+      width: min(1100px, calc(100vw - 48px));
+      aspect-ratio: 16 / 9;
+      border-radius: 22px;
+      overflow: hidden;
+      background: #111;
+    }
     iframe { width: 100%; height: 100%; border: 0; background: #000; }
+    button {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      z-index: 2;
+      width: 36px;
+      height: 36px;
+      border: 0;
+      border-radius: 50%;
+      background: rgba(0, 0, 0, 0.55);
+      color: #fff;
+      font-size: 22px;
+      line-height: 1;
+      cursor: pointer;
+    }
+    button:hover { background: rgba(0, 0, 0, 0.8); }
   </style>
 </head>
 <body>
-  <p>How to use Underlay</p>
   <div class="stage">
+    <button type="button" id="x" aria-label="Close">×</button>
     <iframe
       src="https://www.youtube.com/embed/e8NrmsJGZP0?autoplay=1&rel=0&modestbranding=1&playsinline=1"
       title="How to guide"
@@ -23,5 +45,10 @@
       allowfullscreen
     ></iframe>
   </div>
+  <script>
+    document.getElementById("x").addEventListener("click", function () {
+      window.close();
+    });
+  </script>
 </body>
 </html>
